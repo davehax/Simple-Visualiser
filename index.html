@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Simple Visualiser</title>
+    <link href="style.css" rel="stylesheet" />
+</head>
+
+<body>
+    <div class="app-body">
+        <!-- <audio crossorigin="true" id="music"></audio> -->
+
+        <canvas id="vis"></canvas>
+
+        <div class="bar">
+            <input id="musicfile" type="file" name="music" />
+        </div>
+    </div>
+
+
+    <script type="text/javascript">
+        let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        let fileinput = document.getElementById("musicfile");
+        
+        let canvas = document.getElementById("vis");
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        let cw = window.innerWidth;
+        let ch = window.innerHeight;
+        let ctx = canvas.getContext("2d");
+
+        let fftSize = 2048;
+
+        let blockCount = 100;
+        // we divide fftSize by 2 as per the following discussion:
+        // https://stackoverflow.com/questions/14789283/what-does-the-fft-data-in-the-web-audio-api-correspond-to/14789992#14789992
+        // Web Audio API returns frequency data with fftSize/2 bins filled
+        let blockSize = Math.floor((fftSize/4) / blockCount);
+
+
+        
+
+        fileinput.addEventListener("change", (evt) => {
+            // First, make sure that we have been given a file
+            let file = fileinput.files[0];
+            if (file) {
+                // Create a new Audio object
+                let audio = new Audio();
+                audio.crossOrigin = "anonymous"; // while testing locally, i guess ? Maybe it's required when hosted as well
+
+                // Create a FileReader object to get a DataURL version of the file contents
+                let fr = new FileReader();
+
+                // Attach onload event before reading the file so we don't miss the event being triggered
+                fr.onload = (event) => {
+                    // Set the Audio objects src
+                    audio.src = event.srcElement.result;
+                    
+                    // Using the AudioContext object created at the top
+                    // Create a source and an analyser. The analyser gives us freq data
+                    let source = audioCtx.createMediaElementSource(audio);
+                    let analyser = audioCtx.createAnalyser();
+                    // Connect the source to the analyser
+                    source.connect(analyser);
+                    // Connect the analyser to the destination (output)
+                    analyser.connect(audioCtx.destination);
+
+                    // Play the audio
+                    audio.play();
+
+                    analyser.fftSize = fftSize;
+                    let bufferLength = analyser.fftSize;
+                    let dataArray = new Uint8Array(bufferLength);
+
+                    let logger = () => {
+                        analyser.getByteFrequencyData(dataArray);
+                        let blocks = [];
+                        
+                        // group data into blocks of <blockCount>
+                        for (let i = 0; i < blockCount; i++) {
+                            let start = i * blockSize;
+                            let total = 0;
+
+                            for (let j = 0; j < blockSize; j++) {
+                                total += dataArray[start + j];
+                            }
+
+                            total = Math.round(total / blockSize); // rounded average
+                            blocks[i] = total;
+                        }
+
+                        draw(blocks);
+                        requestAnimationFrame(logger);
+                    }
+
+                    requestAnimationFrame(logger);
+                }
+
+                fr.readAsDataURL(file);
+            }
+        });
+
+
+        let draw = (blocks) => {
+            // clear canvas
+            ctx.clearRect(0, 0, cw, ch);
+
+            // draw boundaries
+            let dw = cw - 100;
+            let dh = ch - 100;
+
+            let baseline = Math.round(window.innerHeight / 2);
+            let ds = 50;
+            let blockWidth = Math.round(dw / blocks.length);
+
+            ctx.fillStyle = "#FFFFFF";
+
+            for (let i = 0; i < blocks.length; i++) {
+                let blockHeight = 10 + blocks[i];
+                ctx.fillRect(ds + (i * blockWidth) + 1, baseline - (blockHeight/2), blockWidth - 2, blockHeight);
+            }
+        }
+
+        window.addEventListener("resize", (evt) => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            cw = window.innerWidth;
+            ch = window.innerHeight;
+        });
+
+    </script>
+</body>
+
+</html>
