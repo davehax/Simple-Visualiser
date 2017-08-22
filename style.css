@@ -18,3 +18,18 @@ html, body {
 
     padding: 25px;
 }
+
+.song-display {
+    position: fixed;
+    right: 50px;
+    bottom: 50px;
+}
+
+.artist, .title {
+    margin: 0;
+    font-family: 'Slabo 27px', serif;
+    text-transform: uppercase;
+}
+
+.artist { color: #fff; }
+.title { color: #00faff; }

@@ -4,6 +4,7 @@
 <head>
     <title>Simple Visualiser</title>
     <link href="style.css" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css?family=Slabo+27px" rel="stylesheet">
 </head>
 
 <body>
@@ -12,122 +13,210 @@
 
         <canvas id="vis"></canvas>
 
+        <div class="song-display" style="display: none;">
+            <h1 class="title"></h1>
+            <h3 class="artist"></h3>
+        </div>
+
         <div class="bar">
             <input id="musicfile" type="file" name="music" />
         </div>
     </div>
 
-
+    <script type="text/javascript" src="jsmediatags.min.js"></script>
     <script type="text/javascript">
-        let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        let fileinput = document.getElementById("musicfile");
+        let Renderer = function (canvasId) {
+            // Get the canvas element
+            let canvas = document.getElementById(canvasId);
+            // Variables for use in drawing the visualiser
+            let cw = window.innerWidth;
+            let ch = window.innerHeight;
+            let ctx = canvas.getContext("2d");
+            // draw boundaries
+            let ds = 50;
+            let dw = cw - 100;
+            let dh = ch - 100;
+            let baseline = Math.round(window.innerHeight / 2);
+            let yMax = window.innerHeight - 200;
+            
+            // scale y axis
+            let yAxisScale = (v) => {
+                // v between 0 and 255. scale to between 0 and yScale
+                return (v/255) * yMax;
+            }
+
+            this.ResizeCanvas = () => {
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+                // update canvas width/height vars
+                cw = window.innerWidth;
+                ch = window.innerHeight;
+                // update draw width/height vars
+                dw = cw - 100;
+                dh = ch - 100;
+                baseline = Math.round(window.innerHeight / 2);
+                yMax = window.innerHeight - 200;
+            }
+
+            // scale canvas as window is resized
+            window.addEventListener("resize", this.ResizeCanvas);
+
+            // draw!
+            this.Draw = (blocks) => {
+                // clear canvas
+                ctx.clearRect(0, 0, cw, ch);
+                // calc block width
+                let blockWidth = dw / blocks.length;
+                ctx.fillStyle = "#FFFFFF";
+
+                for (let i = 0; i < blocks.length; i++) {
+                    // calculate this individual block height
+                    let blockHeight = yAxisScale(blocks[i]);
+                    // draw the block
+                    ctx.fillRect(ds + (i * blockWidth) + 1, baseline - (blockHeight / 2), blockWidth - 2, blockHeight);
+                }
+            }
+
+            // Trigger a resize of the canvas
+            this.ResizeCanvas();
+
+            return this;
+        }
+
+        let AudioParser = function (blockCount) {
+            let audio = null;
+
+            this.Clear = () => {
+                if (audio !== null) {
+                    audio.pause();
+                    audio = null;
+                }
+            }
+
+            this.Parse = (dataUrl) => {
+                // Clean things up before starting again
+                this.Clear();
+                // Create a new Audio object
+                audio = new Audio();
+                audio.crossOrigin = "anonymous"; // while testing locally, i guess? Maybe it's required when hosted as well
+
+                // Set the Audio objects src
+                audio.src = event.srcElement.result;
+
+                // Using the AudioContext object
+                let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                // Create a source and an analyser. The analyser gives us freq data
+                let source = audioCtx.createMediaElementSource(audio);
+                let analyser = audioCtx.createAnalyser();
+                analyser.fftSize = fftSize;
+                // Connect the source to the analyser
+                source.connect(analyser);
+                // Connect the analyser to the destination (output)
+                analyser.connect(audioCtx.destination);
+
+                // Play the audio
+                audio.play();
+
+                // console.log(audio.duration);
+                audio.onprogress = (evt) => console.log(evt);
+
+                audio.addEventListener("loadedmetadata", (evt) => {
+                    console.log(evt);
+                    console.log(audio.duration);
+                })
+
+                
+                let bufferLength = analyser.fftSize;
+                let dataArray = new Uint8Array(bufferLength);
+
+                let getFreqData = () => {
+                    analyser.getByteFrequencyData(dataArray);
+                    let blocks = [];
+
+                    // group data into blocks of <blockCount>
+                    for (let i = 0; i < blockCount; i++) {
+                        let start = i * blockSize;
+                        let total = 0;
+
+                        for (let j = 0; j < blockSize; j++) {
+                            total += dataArray[start + j];
+                        }
+
+                        total = Math.round(total / blockSize); // rounded average
+                        blocks[i] = total;
+                    }
+
+                    renderer.Draw(blocks);
+                    if (audio !== null && !audio.paused) {
+                        requestAnimationFrame(getFreqData);
+                    }
+                }
+
+                requestAnimationFrame(getFreqData);
+            }
+
+            return this;
+        }
+
+        let hideTrackDisplay = () => {
+            document.querySelector(".song-display").style.display = "none";
+        }
+
+        let updateTrackDisplay = (file) => {
+            if (file) {
+                // use jsmediatags to read metadata from blob
+                jsmediatags.read(file, {
+                    // on successful load and read, update track display
+                    onSuccess: (tag) => {
+                        document.querySelector(".song-display").style.display = "block";
+                        document.querySelector(".title").innerText = tag.tags.title;
+                        document.querySelector(".artist").innerText = tag.tags.artist;
+                    },
+                    // on error, hide track display and log error to console
+                    onError: (error) => {
+                        console.log(error);
+                        hideTrackDisplay();
+                    }
+                });
+            }
+            else {
+                // no file passed in? just hide track display
+                hideTrackDisplay();
+            }
+        }
+
         
-        let canvas = document.getElementById("vis");
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-        let cw = window.innerWidth;
-        let ch = window.innerHeight;
-        let ctx = canvas.getContext("2d");
-
+        let fileinput = document.getElementById("musicfile");
         let fftSize = 2048;
-
-        let blockCount = 100;
+        let blockCount = 256;
         // we divide fftSize by 2 as per the following discussion:
         // https://stackoverflow.com/questions/14789283/what-does-the-fft-data-in-the-web-audio-api-correspond-to/14789992#14789992
         // Web Audio API returns frequency data with fftSize/2 bins filled
-        let blockSize = Math.floor((fftSize/4) / blockCount);
+        let blockSize = Math.floor((fftSize/3) / blockCount);
 
-
-        
+        let audioParser = new AudioParser(blockCount);
+        let renderer = new Renderer("vis");
 
         fileinput.addEventListener("change", (evt) => {
+            hideTrackDisplay();
+
             // First, make sure that we have been given a file
             let file = fileinput.files[0];
             if (file) {
-                // Create a new Audio object
-                let audio = new Audio();
-                audio.crossOrigin = "anonymous"; // while testing locally, i guess ? Maybe it's required when hosted as well
+
+                updateTrackDisplay(file);
 
                 // Create a FileReader object to get a DataURL version of the file contents
                 let fr = new FileReader();
 
                 // Attach onload event before reading the file so we don't miss the event being triggered
                 fr.onload = (event) => {
-                    // Set the Audio objects src
-                    audio.src = event.srcElement.result;
-                    
-                    // Using the AudioContext object created at the top
-                    // Create a source and an analyser. The analyser gives us freq data
-                    let source = audioCtx.createMediaElementSource(audio);
-                    let analyser = audioCtx.createAnalyser();
-                    // Connect the source to the analyser
-                    source.connect(analyser);
-                    // Connect the analyser to the destination (output)
-                    analyser.connect(audioCtx.destination);
-
-                    // Play the audio
-                    audio.play();
-
-                    analyser.fftSize = fftSize;
-                    let bufferLength = analyser.fftSize;
-                    let dataArray = new Uint8Array(bufferLength);
-
-                    let logger = () => {
-                        analyser.getByteFrequencyData(dataArray);
-                        let blocks = [];
-                        
-                        // group data into blocks of <blockCount>
-                        for (let i = 0; i < blockCount; i++) {
-                            let start = i * blockSize;
-                            let total = 0;
-
-                            for (let j = 0; j < blockSize; j++) {
-                                total += dataArray[start + j];
-                            }
-
-                            total = Math.round(total / blockSize); // rounded average
-                            blocks[i] = total;
-                        }
-
-                        draw(blocks);
-                        requestAnimationFrame(logger);
-                    }
-
-                    requestAnimationFrame(logger);
+                    audioParser.Parse(event.srcElement.result);
                 }
 
                 fr.readAsDataURL(file);
             }
         });
-
-
-        let draw = (blocks) => {
-            // clear canvas
-            ctx.clearRect(0, 0, cw, ch);
-
-            // draw boundaries
-            let dw = cw - 100;
-            let dh = ch - 100;
-
-            let baseline = Math.round(window.innerHeight / 2);
-            let ds = 50;
-            let blockWidth = Math.round(dw / blocks.length);
-
-            ctx.fillStyle = "#FFFFFF";
-
-            for (let i = 0; i < blocks.length; i++) {
-                let blockHeight = 10 + blocks[i];
-                ctx.fillRect(ds + (i * blockWidth) + 1, baseline - (blockHeight/2), blockWidth - 2, blockHeight);
-            }
-        }
-
-        window.addEventListener("resize", (evt) => {
-            canvas.width = window.innerWidth;
-            canvas.height = window.innerHeight;
-            cw = window.innerWidth;
-            ch = window.innerHeight;
-        });
-
     </script>
 </body>
 
