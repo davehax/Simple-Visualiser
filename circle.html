@@ -8,12 +8,12 @@
 </head>
 
 <body>
-    <div class="app-body">
+    <div class="app-body circle">
         <!-- <audio crossorigin="true" id="music"></audio> -->
 
         <canvas id="vis"></canvas>
 
-        <div class="song-display" style="display: none;">
+        <div class="song-display" style="display: none;" title="Click to change colours!">
             <h1 class="title"></h1>
             <h3 class="artist"></h3>
         </div>
@@ -24,6 +24,8 @@
     </div>
 
     <script type="text/javascript" src="js/jsmediatags.min.js"></script>
+    <script type="text/javascript" src="js/tinycolor.min.js"></script>
+    <script type="text/javascript" src="js/tinygradient.min.js"></script>
     <script type="text/javascript" src="js/audioparser.js"></script>
     <script type="text/javascript">
         let Renderer = function (canvasId) {
@@ -39,6 +41,21 @@
             let dh = ch - 100;
             let baseline = Math.round(window.innerHeight / 2);
             let yMax = window.innerHeight - 200;
+
+            // rotation vars
+            let offset = Math.PI / 2;
+
+            // gradient vars
+            let gradients = [
+                ['#C800D3', '#FF0A60', '#FAD927', '#11C7AC', '#0B00C9'], // ;
+                ['#036B75', '#0AFCE8', '#FCE508', '#FA0AE3', '#260C58'], // holy Lanterns
+                ['#AFF300', '#00F39E', '#00CBF3', '#7F00F3'], // we are not amused
+                ['#556270', '#4ECDC4', '#C7F464', '#FF6B6B', '#C44D58'], // cheer up emo kid
+                ['#69D2E7', '#69D2E7', '#FA6900', '#FA6900', '#FA6900', '#69D2E7', '#FA6900', '#FA6900', '#FA6900', '#69D2E7', '#000000']
+            ];
+            let currentGradient = 0;
+            let gradient = undefined;
+            let gradientSteps = undefined;
             
             // scale y axis
             let yAxisScale = (v) => {
@@ -59,39 +76,58 @@
                 yMax = window.innerHeight - 200;
             }
 
-            // scale canvas as window is resized
-            window.addEventListener("resize", this.ResizeCanvas);
+            this.NextGradient = () => {
+                currentGradient = (currentGradient + 1) % gradients.length;
+                gradient = undefined;
+                gradientSteps = undefined;
+            }
 
             // draw!
             this.Draw = (blocks, currentTime, duration) => {
                 // clear canvas
                 ctx.clearRect(0, 0, cw, ch);
 
+                // calc line width
+                let arcWidth = ((dw / 2) / blocks.length);
+                ctx.lineWidth = arcWidth - 1;
+                ctx.strokeStyle = "#FFFFFF";
+
+                // calc midpoint
+                let x = cw/2;
+                let y = ch/2;
+
+                // Create our gradient if we need to
+                gradient = gradient || tinygradient(gradients[currentGradient]);
+                gradientSteps = gradientSteps || gradient.rgb(blocks.length);
+
+                // Draw each block of the visualiser
+                for (let i = 0; i < blocks.length; i++) {
+                    // calculate arc size (between 0 and 180 degrees)
+                    let arcAngle = blocks[i]/255 * (Math.PI * 1.15);
+                    let startArc = -arcAngle + offset;
+                    let endArc = arcAngle + offset;
+                    let radius = dw/2 - (blocks.length - i)*arcWidth;
+
+                    ctx.strokeStyle = gradientSteps[i].toRgbString();
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius, startArc, endArc);
+                    ctx.stroke();
+                }
+
                 // draw progress bar
                 let pw = currentTime/duration * cw;
                 ctx.fillStyle = "#00faff";
                 ctx.fillRect(0, 0, pw, 6);
-
-                // calc block width
-                let blockWidth = dw / blocks.length;
-                ctx.fillStyle = "#FFFFFF";
-
-                // Draw each block of the visualiser
-                for (let i = 0; i < blocks.length; i++) {
-                    // calculate this individual block height
-                    let blockHeight = yAxisScale(blocks[i]);
-                    // draw the block
-                    ctx.fillRect(ds + (i * blockWidth) + 1, baseline - (blockHeight / 2), blockWidth - 2, blockHeight);
-                }
             }
 
             // Trigger a resize of the canvas
             this.ResizeCanvas();
 
+            // scale canvas as window is resized
+            window.addEventListener("resize", this.ResizeCanvas);
+
             return this;
         }
-
-        
 
         let hideTrackDisplay = () => {
             document.querySelector(".song-display").style.display = "none";
@@ -122,7 +158,7 @@
         
         let fileinput = document.getElementById("musicfile");
         let fftSize = 2048;
-        let blockCount = Math.floor(window.innerWidth / 10);
+        let blockCount = Math.floor(window.innerWidth / 30);
         // we divide fftSize by 2 as per the following discussion:
         // https://stackoverflow.com/questions/14789283/what-does-the-fft-data-in-the-web-audio-api-correspond-to/14789992#14789992
         // Web Audio API returns frequency data with fftSize/2 bins filled
@@ -132,12 +168,10 @@
         let renderer = new Renderer("vis");
 
         fileinput.addEventListener("change", (evt) => {
-            hideTrackDisplay();
-
             // First, make sure that we have been given a file
             let file = fileinput.files[0];
             if (file) {
-
+                hideTrackDisplay();
                 updateTrackDisplay(file);
 
                 // Create a FileReader object to get a DataURL version of the file contents
@@ -146,11 +180,17 @@
                 // Attach onload event before reading the file so we don't miss the event being triggered
                 fr.onload = (event) => {
                     audioParser.Parse(event.srcElement.result, blockCount, renderer.Draw);
+                    renderer.NextGradient();
                 }
 
                 fr.readAsDataURL(file);
             }
         });
+
+
+        document.querySelector('.song-display').addEventListener('click', (evt) => {
+            renderer.NextGradient();
+        })
     </script>
 </body>
 
